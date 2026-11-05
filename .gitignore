@@ -1,0 +1,9 @@
+# Personal / runtime data - never commit
+data/
+img_key.txt
+imgs_ok/
+*.png
+*.jpg
+*.dat
+*.skill
+__pycache__/
