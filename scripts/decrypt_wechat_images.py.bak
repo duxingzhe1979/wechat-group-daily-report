@@ -1,0 +1,131 @@
+# -*- coding: utf-8 -*-
+"""Batch-decrypt WeChat 4.x V2 image dat files with the verified key.
+
+AES-128-ECB on the aligned body after the 15-byte header; the unaligned
+remainder is XORed with a single byte. Output sniffed: jpeg/png/webp/gif
+written directly, wxgf decoded to png via PyAV.
+"""
+import os
+import sys
+from Crypto.Cipher import AES
+
+KEY = b"01a307796a867af3"
+XOR = 0xFC
+START = 0x0F
+ATTACH = r"C:\Users\Administrator\Documents\xwechat_files\wxid_upom76o4oi7f22_cfe4\msg\attach"
+GROUPS = {
+    "maji": "942dab0d9feffd00f8b33c57294da2ee",
+    "daka": "958c040e0525e8bf1e73f6758ea56075",
+    "mcn":  "a1e369adafe2f502117fcc3c404b1e0b",
+}
+MONTH = sys.argv[1] if len(sys.argv) > 1 else "2026-11"
+OUTROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "imgs_ok")
+
+try:
+    import av  # wxgf decode
+except ImportError:
+    av = None
+
+
+def sniff(pt):
+    if pt.startswith(b"\xff\xd8\xff"):
+        return "jpg", pt
+    if pt.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png", pt
+    if pt.startswith(b"RIFF") and pt[8:12] == b"WEBP":
+        return "webp", pt
+    if pt.startswith((b"GIF87a", b"GIF89a")):
+        return "gif", pt
+    if pt.startswith((b"wxgf", b"WXGF")):
+        return "wxgf", pt
+    return None, pt
+
+
+def decrypt_file(src):
+    """V2 layout: 15-byte header (magic6 + aes_len@6 + xor_len@10 + flag),
+    then AES-ECB over ceil(aes_len/16)*16 bytes, then single-byte-XOR over the rest."""
+    import struct
+    with open(src, "rb") as f:
+        raw = f.read()
+    if len(raw) <= START + 16 or not raw.startswith(bytes((0x07, 0x08, 0x56, 0x32, 0x08, 0x07))):
+        return None
+    aes_len = struct.unpack("<I", raw[6:10])[0]
+    n = (aes_len & ~0xF) + 16  # AES region covers one extra block past aligned aes_len
+    body = raw[START:]
+    if n > len(body):
+        n = len(body) & ~0xF
+    try:
+        pt = AES.new(KEY, AES.MODE_ECB).decrypt(body[:n]) + bytes(b ^ XOR for b in body[n:])
+    except ValueError:
+        return None
+    return pt
+
+
+def wxgf_to_png(pt, out_base):
+    if av is None:
+        return False
+    # locate Annex-B start code (HEVC payload), not a fixed header offset
+    i = pt.find(b"\x00\x00\x00\x01")
+    if i < 0:
+        i = pt.find(b"\x00\x00\x01")
+    if i < 0:
+        return False
+    hevc = pt[i:]
+    tmp = out_base + ".hevc"
+    try:
+        with open(tmp, "wb") as f:
+            f.write(hevc)
+        with av.open(tmp) as container:
+            for frame in container.decode(video=0):
+                frame.to_image().save(out_base + ".png")
+                return True
+    except Exception:
+        return False
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    return False
+
+
+def main():
+    ok = bad = 0
+    for gname, ghash in GROUPS.items():
+        imgdir = os.path.join(ATTACH, ghash, MONTH, "Img")
+        outdir = os.path.join(OUTROOT, gname)
+        os.makedirs(outdir, exist_ok=True)
+        if not os.path.isdir(imgdir):
+            print(f"{gname}: no {imgdir}")
+            continue
+        names = sorted(f for f in os.listdir(imgdir) if f.endswith(".dat"))
+        for i, name in enumerate(names):
+            src = os.path.join(imgdir, name)
+            pt = decrypt_file(src)
+            if pt is None:
+                bad += 1
+                continue
+            fmt, payload = sniff(pt)
+            base = os.path.join(outdir, os.path.splitext(name)[0])
+            written = None
+            if fmt in ("jpg", "png", "webp", "gif"):
+                with open(base + "." + fmt, "wb") as f:
+                    f.write(payload)
+                written = base + "." + fmt
+            elif fmt == "wxgf":
+                if wxgf_to_png(payload, base):
+                    written = base + ".png"
+                else:
+                    with open(base + ".wxgf", "wb") as f:
+                        f.write(payload)
+                    written = base + ".wxgf"
+            if written:
+                ok += 1
+            else:
+                bad += 1
+        print(f"{gname}: {len(names)} dat processed")
+    print(f"TOTAL ok={ok} bad={bad} -> {OUTROOT}")
+
+
+if __name__ == "__main__":
+    main()
