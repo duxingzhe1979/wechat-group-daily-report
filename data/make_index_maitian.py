@@ -1,0 +1,27 @@
+# -*- coding: utf-8 -*-
+import json
+
+spec = {
+    "report_date": "2026-11-09",
+    "range_label": "各群统计范围见卡片内标注",
+    "groups": [
+        {
+            "name": "🥇麦田合伙人",
+            "file": "麦田合伙人日报_2026-11-08.html",
+            "range_label": "2026-11-08 00:00 ～ 2026-11-09 10:36",
+            "total": "100",
+            "members": "27",
+            "peak": "10:00",
+            "top_speaker": "罗麦子 · 55条",
+            "highlights": [
+                "西安线下短视频组局：现场出文案、田野指导、直播演示，多位到场者当天拍出短视频",
+                "麦冲操盘发售方法：提前1-2个月预热、不接临时急单，档期已排到明年2月",
+                "冉冉（006号）未发售已9位私教、GMV 1.3W，定价从三位数升到1999"
+            ],
+        }
+    ],
+}
+
+with open("data/maitian_index.json", "w", encoding="utf-8") as f:
+    json.dump(spec, f, ensure_ascii=False, indent=2)
+print("ok")
